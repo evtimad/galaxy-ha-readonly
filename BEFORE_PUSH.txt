@@ -1,0 +1,5 @@
+BEFORE PUSHING:
+1. Replace YOUR_USERNAME in repository.yaml.
+2. Replace YOUR_USERNAME in galaxy_readonly/config.yaml.
+3. Do not add credentials, PINs, keys, panel exports, or packet captures.
+4. repository.yaml must remain at repository root.

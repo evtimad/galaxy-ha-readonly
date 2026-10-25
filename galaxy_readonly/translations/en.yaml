@@ -1,0 +1,19 @@
+configuration:
+  panel_name:
+    name: Panel name
+  module_name:
+    name: Ethernet module
+  listen_protocol:
+    name: Listener protocol
+  listen_port:
+    name: Listener port
+  bind_address:
+    name: Bind address
+  allowed_sender:
+    name: Allowed sender IP
+  event_format:
+    name: Event format
+  retain_events:
+    name: Retained events
+  log_raw_messages:
+    name: Log raw messages
