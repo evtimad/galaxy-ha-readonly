@@ -1,5 +1,5 @@
 name: Galaxy 3-144 Read-only Gateway
-version: "0.2.0"
+version: "0.3.0"
 slug: galaxy_3144_readonly
 description: Read-only LAN event gateway and dashboard for Galaxy 3-144 with E080
 url: https://github.com/YOUR_USERNAME/galaxy-ha-readonly

@@ -18,7 +18,7 @@ try { options = { ...defaults, ...JSON.parse(fs.readFileSync(optionsPath, 'utf8'
 
 const state = {
   panel: { name: options.panel_name, module: options.module_name, mode: 'read-only', receiver: `${options.listen_protocol}:${options.listen_port}`, lastSender: null, lastMessageAt: null },
-  stats: { received: 0, rejected: 0, parseErrors: 0, startedAt: new Date().toISOString() },
+  stats: { received: 0, rejected: 0, parseErrors: 0, bytes: 0, startedAt: new Date().toISOString() },
   events: []
 };
 const sse = new Set();
@@ -55,9 +55,10 @@ function publish(message, sender, transport) {
   const event = {
     id: crypto.randomUUID(), time: new Date().toISOString(), sender, transport,
     format: options.event_format === 'raw' ? 'raw' : 'sia_text', ...meta,
-    message: redact(text || '[binary payload]'), bytes: message.length, hex: hexPreview(message)
+    message: redact(text || '[binary payload]'), bytes: message.length, hex: hexPreview(message), ascii: message.subarray(0,256).toString('latin1').replace(/[^\x20-\x7E]/g,'.')
   };
   state.stats.received += 1;
+  state.stats.bytes += message.length;
   state.panel.lastSender = sender;
   state.panel.lastMessageAt = event.time;
   state.events.unshift(event);
