@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const optionsPath = '/data/options.json';
 const defaults = {
   panel_name: 'Galaxy 3-144 V5.00', module_name: 'E080-08A', listen_protocol: 'udp',
-  listen_port: 10002, bind_address: '0.0.0.0', allowed_sender: '', event_format: 'auto',
+  listen_port: 1002, bind_address: '0.0.0.0', allowed_sender: '', event_format: 'auto',
   retain_events: 500, log_raw_messages: false
 };
 let options = defaults;
@@ -39,6 +39,7 @@ function classify(text) {
   const hit = codes.find(([code]) => new RegExp(`(^|[^A-Z])${code}([^A-Z]|$)`).test(upper));
   return hit ? { code: hit[0], type: hit[1], title: hit[2] } : { code: null, type: 'event', title: 'Събитие от панела' };
 }
+function hexPreview(buffer) { return buffer.subarray(0, 256).toString('hex').match(/.{1,2}/g)?.join(' ') || ''; }
 function redact(text) {
   return text.replace(/\b\d{6,}\b/g, value => `${value.slice(0,2)}***${value.slice(-2)}`);
 }
@@ -49,12 +50,12 @@ function publish(message, sender, transport) {
     return;
   }
   const text = safeText(message);
-  if (!text) { state.stats.parseErrors += 1; return; }
+  if (!text && message.length === 0) { state.stats.parseErrors += 1; return; }
   const meta = classify(text);
   const event = {
     id: crypto.randomUUID(), time: new Date().toISOString(), sender, transport,
     format: options.event_format === 'raw' ? 'raw' : 'sia_text', ...meta,
-    message: redact(text)
+    message: redact(text || '[binary payload]'), bytes: message.length, hex: hexPreview(message)
   };
   state.stats.received += 1;
   state.panel.lastSender = sender;

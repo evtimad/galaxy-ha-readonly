@@ -1,8 +1,8 @@
 name: Galaxy 3-144 Read-only Gateway
-version: "0.1.0"
+version: "0.2.0"
 slug: galaxy_3144_readonly
 description: Read-only LAN event gateway and dashboard for Galaxy 3-144 with E080
-url: https://github.com/evtimad/galaxy-ha-readonly
+url: https://github.com/YOUR_USERNAME/galaxy-ha-readonly
 arch:
   - aarch64
   - amd64
@@ -21,7 +21,7 @@ options:
   panel_name: Galaxy 3-144 V5.00
   module_name: E080-08A
   listen_protocol: udp
-  listen_port: 10002
+  listen_port: 1002
   bind_address: 0.0.0.0
   allowed_sender: ""
   event_format: auto
@@ -38,8 +38,8 @@ schema:
   retain_events: int(10,5000)
   log_raw_messages: bool
 ports:
-  10002/udp: null
-  10002/tcp: null
+  1002/udp: null
+  1002/tcp: null
 ports_description:
-  10002/udp: Optional E080 event input when UDP is selected
-  10002/tcp: Optional E080 event input when TCP is selected
+  1002/udp: Optional E080 event input when UDP is selected
+  1002/tcp: Optional E080 event input when TCP is selected
