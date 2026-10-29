@@ -1,11 +1,8 @@
 # Changelog
+## 0.4.1
+- Fix: read SUPERVISOR_TOKEN from the s6 container environment when it is missing from the process environment.
+- Startup check logs "HA API: connected"; every HA call is logged (OK or error).
+- sensor.galaxy_last_event is created at startup with state "waiting".
 ## 0.4.0
 - Event Monitor compatible receiver for the E080 A.Monitor channel (UDP 10002).
-- Session handshake reply (05 01 xx -> 50 01 xx) and per-event ACK, CRC-16/0x1021.
-- CRC validation of every incoming frame; invalid or unknown frames are logged and never answered.
-- Replies only to the configured E080 IP address.
-- Duplicate suppression for retransmitted events.
-- Fires `galaxy_event` and updates `sensor.galaxy_last_event` in Home Assistant.
-- No panel control of any kind.
-## 0.3.0
-- Passive diagnostics.
+- Session reply and per-event ACK, CRC-16/0x1021. No panel control.

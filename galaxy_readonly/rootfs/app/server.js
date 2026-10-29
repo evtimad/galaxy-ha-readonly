@@ -10,10 +10,8 @@ const defaults = { panel_name: 'Galaxy 3-144 V5.00', module_name: 'E080-08A', li
 let opt = defaults;
 try { opt = { ...defaults, ...JSON.parse(fs.readFileSync('/data/options.json', 'utf8')) }; } catch { console.warn('Using default options'); }
 
-// ---- Protocol (derived from captures of Event Monitor 6.30 <-> E080, account 000001) ----
-const INIT_HELLO = 0x0000;   // 5-byte session frames
-const INIT_EVENT = 0x9E81;   // 51-byte event frames from E080
-const INIT_ACK   = 0x4A04;   // 9-byte ACK frames to E080
+// ---- Protocol (from captures of Event Monitor 6.30 <-> E080, account 000001) ----
+const INIT_HELLO = 0x0000, INIT_EVENT = 0x9E81, INIT_ACK = 0x4A04;
 function crc16(buf, init) {
   let c = init;
   for (const b of buf) { c ^= b << 8; for (let i = 0; i < 8; i++) c = (c & 0x8000) ? ((c << 1) ^ 0x1021) & 0xffff : (c << 1) & 0xffff; }
@@ -26,32 +24,49 @@ function ackFor(m) { return withCrc(Buffer.from([0x06, m[1], m[2], m[3], 0x52, 0
 function digit(b, key) { const c = b ^ key; return c >= 0x30 && c <= 0x39 ? String.fromCharCode(c) : '?'; }
 function panelTime(m) { return `?${digit(m[18], 0xB5)}:${digit(m[20], 0x12)}${digit(m[21], 0xD6)}`; }
 
+// ---- Home Assistant API ----
+function haToken() {
+  if (process.env.SUPERVISOR_TOKEN) return process.env.SUPERVISOR_TOKEN;
+  for (const f of ['/run/s6/container_environment/SUPERVISOR_TOKEN', '/var/run/s6/container_environment/SUPERVISOR_TOKEN']) {
+    try { const t = fs.readFileSync(f, 'utf8').trim(); if (t) return t; } catch {}
+  }
+  return '';
+}
+const HA_TOKEN = haToken();
+async function haCall(p, body) {
+  if (!opt.ha_events) return;
+  if (!HA_TOKEN) { console.warn(`HA API ${p}: no SUPERVISOR_TOKEN, skipped`); return; }
+  try {
+    const r = await fetch(`http://supervisor/core/api/${p}`, { method: 'POST', headers: { Authorization: `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (r.ok) console.log(`HA API ${p}: OK`); else console.warn(`HA API ${p}: HTTP ${r.status} ${await r.text()}`);
+  } catch (e) { console.warn(`HA API ${p}: ${e.message}`); }
+}
+async function haCheck() {
+  if (!opt.ha_events) { console.log('HA integration disabled (ha_events: false)'); return; }
+  if (!HA_TOKEN) { console.warn('HA API: SUPERVISOR_TOKEN not found - sensor/events will NOT be created'); return; }
+  try {
+    const r = await fetch('http://supervisor/core/api/', { headers: { Authorization: `Bearer ${HA_TOKEN}` } });
+    console.log(r.ok ? 'HA API: connected' : `HA API: HTTP ${r.status}`);
+    if (r.ok) haCall('states/sensor.galaxy_last_event', { state: 'waiting', attributes: { friendly_name: 'Galaxy last event', icon: 'mdi:shield-alert' } });
+  } catch (e) { console.warn(`HA API: ${e.message}`); }
+}
+
 // ---- State ----
 const state = {
   panel: { name: opt.panel_name, module: opt.module_name, receiver: `udp:${opt.listen_port}`, mode: opt.ack_enabled ? 'receiver (ACK)' : 'passive',
-           session: false, lastSender: null, lastMessageAt: null },
+           session: false, ha: HA_TOKEN ? 'token OK' : 'no token', lastSender: null, lastMessageAt: null },
   stats: { received: 0, events: 0, acks: 0, duplicates: 0, rejected: 0, badCrc: 0, unknown: 0, startedAt: new Date().toISOString() },
   events: []
 };
 const sse = new Set();
 const recentSeq = new Map();
-
 function push(ev) {
   state.events.unshift(ev); state.events.length = Math.min(state.events.length, opt.retain_events);
   for (const r of sse) r.write(`event: galaxy\ndata: ${JSON.stringify(ev)}\n\n`);
 }
-async function haCall(p, body) {
-  const t = process.env.SUPERVISOR_TOKEN; if (!t || !opt.ha_events) return;
-  try {
-    const r = await fetch(`http://supervisor/core/api/${p}`, { method: 'POST', headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!r.ok) console.warn(`HA API ${p}: ${r.status}`);
-  } catch (e) { console.warn(`HA API ${p}: ${e.message}`); }
-}
 
 const sock = dgram.createSocket('udp4');
-function send(buf, info, what) {
-  sock.send(buf, info.port, info.address, err => { if (err) console.error(`${what} send error: ${err.message}`); });
-}
+function send(buf, info, what) { sock.send(buf, info.port, info.address, err => { if (err) console.error(`${what} send error: ${err.message}`); }); }
 
 sock.on('message', (m, info) => {
   const sender = info.address, hex = m.toString('hex');
@@ -66,7 +81,6 @@ sock.on('message', (m, info) => {
     push({ time: state.panel.lastMessageAt, type: 'session', title: 'Сесия от E080', detail: hex, sender });
     return;
   }
-
   if (m.length === 51 && m[0] === 0x26) {
     if (!crcOk(m, INIT_EVENT)) { state.stats.badCrc++; console.warn('Event with bad CRC, not acknowledged'); return; }
     if (opt.ack_enabled) { const a = ackFor(m); send(a, info, 'ACK'); state.stats.acks++; if (opt.log_raw_messages) console.log(`[tx] ${a.toString('hex')}`); }
@@ -80,13 +94,13 @@ sock.on('message', (m, info) => {
     haCall('states/sensor.galaxy_last_event', { state: ev.time, attributes: { friendly_name: 'Galaxy last event', seq: ev.seq, panel_time: ev.panel_time, raw: hex, icon: 'mdi:shield-alert' } });
     return;
   }
-
   state.stats.unknown++;
   console.warn(`Unknown frame (${m.length} bytes), not answered: ${hex}`);
   push({ time: state.panel.lastMessageAt, type: 'unknown', title: `Непознат пакет (${m.length} B)`, detail: hex, sender });
 });
 sock.on('error', e => console.error('UDP error:', e.message));
 sock.bind(opt.listen_port, '0.0.0.0', () => console.log(`Galaxy receiver on udp/${opt.listen_port}, ACK ${opt.ack_enabled ? 'ON' : 'OFF'}, sender ${opt.allowed_sender || '(none - all ignored)'}`));
+setTimeout(haCheck, 3000);
 
 // ---- Web UI (Ingress) ----
 const pub = path.join(__dirname, 'public');
@@ -102,5 +116,3 @@ http.createServer((req, res) => {
   const type = file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html';
   res.writeHead(200, { 'content-type': `${type}; charset=utf-8`, 'cache-control': 'no-store' }); fs.createReadStream(file).pipe(res);
 }).listen(8099, '0.0.0.0', () => console.log('Ingress UI on port 8099'));
-
-module.exports = { crc16, helloReply, ackFor, crcOk, INIT_EVENT };
