@@ -1,5 +1,5 @@
 name: Galaxy 3-144 Read-only Gateway
-version: "0.4.1"
+version: "0.4.2"
 slug: galaxy_3144_readonly
 description: Galaxy E080 Alarm Monitor receiver for Home Assistant (no panel control)
 arch:
