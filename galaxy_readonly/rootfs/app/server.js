@@ -1,109 +1,106 @@
-import http from 'node:http';
-import dgram from 'node:dgram';
-import net from 'node:net';
-import fs from 'node:fs';
-import crypto from 'node:crypto';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+'use strict';
+// Galaxy 3-144 / E080 A.Monitor receiver for Home Assistant. No panel control.
+const http = require('http');
+const dgram = require('dgram');
+const fs = require('fs');
+const path = require('path');
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const optionsPath = '/data/options.json';
-const defaults = {
-  panel_name: 'Galaxy 3-144 V5.00', module_name: 'E080-08A', listen_protocol: 'udp',
-  listen_port: 1002, bind_address: '0.0.0.0', allowed_sender: '', event_format: 'auto',
-  retain_events: 500, log_raw_messages: false
-};
-let options = defaults;
-try { options = { ...defaults, ...JSON.parse(fs.readFileSync(optionsPath, 'utf8')) }; } catch { console.warn('Using default options'); }
+const defaults = { panel_name: 'Galaxy 3-144 V5.00', module_name: 'E080-08A', listen_port: 10002,
+  allowed_sender: '', ack_enabled: true, ha_events: true, retain_events: 500, log_raw_messages: true };
+let opt = defaults;
+try { opt = { ...defaults, ...JSON.parse(fs.readFileSync('/data/options.json', 'utf8')) }; } catch { console.warn('Using default options'); }
 
+// ---- Protocol (derived from captures of Event Monitor 6.30 <-> E080, account 000001) ----
+const INIT_HELLO = 0x0000;   // 5-byte session frames
+const INIT_EVENT = 0x9E81;   // 51-byte event frames from E080
+const INIT_ACK   = 0x4A04;   // 9-byte ACK frames to E080
+function crc16(buf, init) {
+  let c = init;
+  for (const b of buf) { c ^= b << 8; for (let i = 0; i < 8; i++) c = (c & 0x8000) ? ((c << 1) ^ 0x1021) & 0xffff : (c << 1) & 0xffff; }
+  return c;
+}
+function withCrc(body, init) { const c = crc16(body, init); return Buffer.concat([body, Buffer.from([c >> 8, c & 0xff])]); }
+function crcOk(m, init) { return m.length > 2 && crc16(m.subarray(0, -2), init) === m.readUInt16BE(m.length - 2); }
+function helloReply(m) { return withCrc(Buffer.from([0x50, m[1], m[2]]), INIT_HELLO); }
+function ackFor(m) { return withCrc(Buffer.from([0x06, m[1], m[2], m[3], 0x52, 0xee, 0x63]), INIT_ACK); }
+function digit(b, key) { const c = b ^ key; return c >= 0x30 && c <= 0x39 ? String.fromCharCode(c) : '?'; }
+function panelTime(m) { return `?${digit(m[18], 0xB5)}:${digit(m[20], 0x12)}${digit(m[21], 0xD6)}`; }
+
+// ---- State ----
 const state = {
-  panel: { name: options.panel_name, module: options.module_name, mode: 'read-only', receiver: `${options.listen_protocol}:${options.listen_port}`, lastSender: null, lastMessageAt: null },
-  stats: { received: 0, rejected: 0, parseErrors: 0, bytes: 0, startedAt: new Date().toISOString() },
+  panel: { name: opt.panel_name, module: opt.module_name, receiver: `udp:${opt.listen_port}`, mode: opt.ack_enabled ? 'receiver (ACK)' : 'passive',
+           session: false, lastSender: null, lastMessageAt: null },
+  stats: { received: 0, events: 0, acks: 0, duplicates: 0, rejected: 0, badCrc: 0, unknown: 0, startedAt: new Date().toISOString() },
   events: []
 };
 const sse = new Set();
+const recentSeq = new Map();
 
-function safeText(buffer) {
-  return buffer.toString('utf8').replace(/[^\x09\x0A\x0D\x20-\x7E\u00A0-\uFFFF]/g, '').trim().slice(0, 4096);
+function push(ev) {
+  state.events.unshift(ev); state.events.length = Math.min(state.events.length, opt.retain_events);
+  for (const r of sse) r.write(`event: galaxy\ndata: ${JSON.stringify(ev)}\n\n`);
 }
-function classify(text) {
-  const upper = text.toUpperCase();
-  const codes = [
-    ['BA','burglary_alarm','Аларма'], ['BR','burglary_restore','Възстановена аларма'],
-    ['TA','tamper','Тампер'], ['TR','tamper_restore','Възстановен тампер'],
-    ['FA','fire','Пожар'], ['FR','fire_restore','Възстановен пожар'],
-    ['PA','panic','Паник аларма'], ['OP','disarmed','Изключване'], ['CL','armed','Включване'],
-    ['AT','ac_fault','Проблем AC'], ['AR','ac_restore','AC възстановено'],
-    ['YT','battery_fault','Проблем акумулатор'], ['YR','battery_restore','Акумулатор възстановен']
-  ];
-  const hit = codes.find(([code]) => new RegExp(`(^|[^A-Z])${code}([^A-Z]|$)`).test(upper));
-  return hit ? { code: hit[0], type: hit[1], title: hit[2] } : { code: null, type: 'event', title: 'Събитие от панела' };
+async function haCall(p, body) {
+  const t = process.env.SUPERVISOR_TOKEN; if (!t || !opt.ha_events) return;
+  try {
+    const r = await fetch(`http://supervisor/core/api/${p}`, { method: 'POST', headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) console.warn(`HA API ${p}: ${r.status}`);
+  } catch (e) { console.warn(`HA API ${p}: ${e.message}`); }
 }
-function hexPreview(buffer) { return buffer.subarray(0, 256).toString('hex').match(/.{1,2}/g)?.join(' ') || ''; }
-function redact(text) {
-  return text.replace(/\b\d{6,}\b/g, value => `${value.slice(0,2)}***${value.slice(-2)}`);
+
+const sock = dgram.createSocket('udp4');
+function send(buf, info, what) {
+  sock.send(buf, info.port, info.address, err => { if (err) console.error(`${what} send error: ${err.message}`); });
 }
-function publish(message, sender, transport) {
-  if (options.allowed_sender && sender !== options.allowed_sender) {
-    state.stats.rejected += 1;
-    console.warn(`Rejected message from ${sender}`);
+
+sock.on('message', (m, info) => {
+  const sender = info.address, hex = m.toString('hex');
+  if (!opt.allowed_sender || sender !== opt.allowed_sender) { state.stats.rejected++; console.warn(`Ignored ${m.length} bytes from ${sender}`); return; }
+  state.stats.received++; state.panel.lastSender = sender; state.panel.lastMessageAt = new Date().toISOString();
+  if (opt.log_raw_messages) console.log(`[rx ${sender}] ${hex}`);
+
+  if (m.length === 5 && m[0] === 0x05) {
+    if (!crcOk(m, INIT_HELLO)) { state.stats.badCrc++; console.warn('Session frame with bad CRC, not answered'); return; }
+    state.panel.session = true;
+    if (opt.ack_enabled) { const r = helloReply(m); send(r, info, 'Session reply'); if (opt.log_raw_messages) console.log(`[tx] ${r.toString('hex')}`); }
+    push({ time: state.panel.lastMessageAt, type: 'session', title: 'Сесия от E080', detail: hex, sender });
     return;
   }
-  const text = safeText(message);
-  if (!text && message.length === 0) { state.stats.parseErrors += 1; return; }
-  const meta = classify(text);
-  const event = {
-    id: crypto.randomUUID(), time: new Date().toISOString(), sender, transport,
-    format: options.event_format === 'raw' ? 'raw' : 'sia_text', ...meta,
-    message: redact(text || '[binary payload]'), bytes: message.length, hex: hexPreview(message), ascii: message.subarray(0,256).toString('latin1').replace(/[^\x20-\x7E]/g,'.')
-  };
-  state.stats.received += 1;
-  state.stats.bytes += message.length;
-  state.panel.lastSender = sender;
-  state.panel.lastMessageAt = event.time;
-  state.events.unshift(event);
-  state.events.length = Math.min(state.events.length, options.retain_events);
-  if (options.log_raw_messages) console.log(`[raw:${sender}] ${redact(text)}`);
-  const payload = `event: galaxy\ndata: ${JSON.stringify(event)}\n\n`;
-  for (const res of sse) res.write(payload);
-}
 
-if (options.listen_protocol === 'udp') {
-  const socket = dgram.createSocket('udp4');
-  socket.on('message', (msg, info) => publish(msg, info.address, 'udp'));
-  socket.on('error', error => console.error('UDP listener error:', error.message));
-  socket.bind(options.listen_port, options.bind_address, () => console.log(`Read-only UDP listener on ${options.bind_address}:${options.listen_port}`));
-} else {
-  const server = net.createServer(socket => {
-    const sender = socket.remoteAddress?.replace('::ffff:','') || 'unknown';
-    socket.setTimeout(30000);
-    let pending = '';
-    socket.on('data', chunk => {
-      pending += chunk.toString('utf8');
-      const lines = pending.split(/\r?\n/); pending = lines.pop() || '';
-      for (const line of lines) publish(Buffer.from(line), sender, 'tcp');
-      if (pending.length > 4096) { publish(Buffer.from(pending), sender, 'tcp'); pending = ''; }
-    });
-    socket.on('end', () => { if (pending.trim()) publish(Buffer.from(pending), sender, 'tcp'); });
-    socket.on('timeout', () => socket.destroy());
-  });
-  server.on('error', error => console.error('TCP listener error:', error.message));
-  server.listen(options.listen_port, options.bind_address, () => console.log(`Read-only TCP listener on ${options.bind_address}:${options.listen_port}`));
-}
-
-const web = http.createServer((req,res) => {
-  const url = new URL(req.url, 'http://localhost');
-  if (url.pathname === '/api/state') return json(res, state);
-  if (url.pathname === '/api/events') return json(res, state.events.slice(0, Math.min(500, Number(url.searchParams.get('limit') || 100))));
-  if (url.pathname === '/api/stream') {
-    res.writeHead(200, {'content-type':'text/event-stream','cache-control':'no-cache','connection':'keep-alive'});
-    res.write(`event: state\ndata: ${JSON.stringify(state)}\n\n`); sse.add(res); req.on('close',()=>sse.delete(res)); return;
+  if (m.length === 51 && m[0] === 0x26) {
+    if (!crcOk(m, INIT_EVENT)) { state.stats.badCrc++; console.warn('Event with bad CRC, not acknowledged'); return; }
+    if (opt.ack_enabled) { const a = ackFor(m); send(a, info, 'ACK'); state.stats.acks++; if (opt.log_raw_messages) console.log(`[tx] ${a.toString('hex')}`); }
+    const seq = m.readUInt16BE(2), now = Date.now();
+    if (recentSeq.has(seq) && now - recentSeq.get(seq) < 120000) { state.stats.duplicates++; return; }
+    recentSeq.set(seq, now); for (const [k, t] of recentSeq) if (now - t > 600000) recentSeq.delete(k);
+    state.stats.events++;
+    const ev = { time: state.panel.lastMessageAt, type: 'event', title: 'Galaxy събитие', seq: seq.toString(16), panel_time: panelTime(m), detail: hex, sender };
+    push(ev);
+    haCall('events/galaxy_event', { seq: ev.seq, panel_time: ev.panel_time, raw: hex, sender, time: ev.time });
+    haCall('states/sensor.galaxy_last_event', { state: ev.time, attributes: { friendly_name: 'Galaxy last event', seq: ev.seq, panel_time: ev.panel_time, raw: hex, icon: 'mdi:shield-alert' } });
+    return;
   }
-  const file = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\//,'');
-  const target = path.join(__dirname, 'public', file);
-  if (!target.startsWith(path.join(__dirname,'public')) || !fs.existsSync(target)) { res.writeHead(404); return res.end('Not found'); }
-  const type = target.endsWith('.js') ? 'text/javascript' : target.endsWith('.css') ? 'text/css' : 'text/html';
-  res.writeHead(200, {'content-type':`${type}; charset=utf-8`,'cache-control':'no-store'}); fs.createReadStream(target).pipe(res);
+
+  state.stats.unknown++;
+  console.warn(`Unknown frame (${m.length} bytes), not answered: ${hex}`);
+  push({ time: state.panel.lastMessageAt, type: 'unknown', title: `Непознат пакет (${m.length} B)`, detail: hex, sender });
 });
-function json(res, value) { res.writeHead(200, {'content-type':'application/json','cache-control':'no-store'}); res.end(JSON.stringify(value)); }
-web.listen(8099, '0.0.0.0', () => console.log('Ingress UI listening on port 8099'));
+sock.on('error', e => console.error('UDP error:', e.message));
+sock.bind(opt.listen_port, '0.0.0.0', () => console.log(`Galaxy receiver on udp/${opt.listen_port}, ACK ${opt.ack_enabled ? 'ON' : 'OFF'}, sender ${opt.allowed_sender || '(none - all ignored)'}`));
+
+// ---- Web UI (Ingress) ----
+const pub = path.join(__dirname, 'public');
+http.createServer((req, res) => {
+  const u = new URL(req.url, 'http://x');
+  if (u.pathname.endsWith('/api/state')) { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end(JSON.stringify(state)); }
+  if (u.pathname.endsWith('/api/stream')) {
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+    res.write(': ok\n\n'); sse.add(res); req.on('close', () => sse.delete(res)); return;
+  }
+  const f = path.join(pub, path.basename(u.pathname) || 'index.html');
+  const file = fs.existsSync(f) && fs.statSync(f).isFile() ? f : path.join(pub, 'index.html');
+  const type = file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html';
+  res.writeHead(200, { 'content-type': `${type}; charset=utf-8`, 'cache-control': 'no-store' }); fs.createReadStream(file).pipe(res);
+}).listen(8099, '0.0.0.0', () => console.log('Ingress UI on port 8099'));
+
+module.exports = { crc16, helloReply, ackFor, crcOk, INIT_EVENT };

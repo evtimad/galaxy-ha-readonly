@@ -1,8 +1,7 @@
 name: Galaxy 3-144 Read-only Gateway
-version: "0.3.0"
+version: "0.4.0"
 slug: galaxy_3144_readonly
-description: Read-only LAN event gateway and dashboard for Galaxy 3-144 with E080
-url: https://github.com/YOUR_USERNAME/galaxy-ha-readonly
+description: Galaxy E080 Alarm Monitor receiver for Home Assistant (no panel control)
 arch:
   - aarch64
   - amd64
@@ -14,32 +13,22 @@ ingress_port: 8099
 panel_icon: mdi:shield-home
 panel_title: Galaxy 3-144
 homeassistant_api: true
-hassio_api: true
-hassio_role: default
 host_network: true
 options:
   panel_name: Galaxy 3-144 V5.00
   module_name: E080-08A
-  listen_protocol: udp
-  listen_port: 1002
-  bind_address: 0.0.0.0
-  allowed_sender: ""
-  event_format: auto
+  listen_port: 10002
+  allowed_sender: "192.168.1.155"
+  ack_enabled: true
+  ha_events: true
   retain_events: 500
-  log_raw_messages: false
+  log_raw_messages: true
 schema:
   panel_name: str
   module_name: str
-  listen_protocol: list(udp|tcp)
   listen_port: port
-  bind_address: str
-  allowed_sender: str?
-  event_format: list(auto|sia_text|raw)
+  allowed_sender: str
+  ack_enabled: bool
+  ha_events: bool
   retain_events: int(10,5000)
   log_raw_messages: bool
-ports:
-  1002/udp: null
-  1002/tcp: null
-ports_description:
-  1002/udp: Optional E080 event input when UDP is selected
-  1002/tcp: Optional E080 event input when TCP is selected

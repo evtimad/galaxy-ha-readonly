@@ -1,19 +1,9 @@
 configuration:
-  panel_name:
-    name: Panel name
-  module_name:
-    name: Ethernet module
-  listen_protocol:
-    name: Listener protocol
-  listen_port:
-    name: Listener port
-  bind_address:
-    name: Bind address
-  allowed_sender:
-    name: Allowed sender IP
-  event_format:
-    name: Event format
-  retain_events:
-    name: Retained events
-  log_raw_messages:
-    name: Log raw messages
+  panel_name: {name: Panel name}
+  module_name: {name: Ethernet module}
+  listen_port: {name: UDP port (A.Monitor)}
+  allowed_sender: {name: E080 IP address}
+  ack_enabled: {name: Acknowledge events (Event Monitor compatible)}
+  ha_events: {name: Fire galaxy_event in Home Assistant}
+  retain_events: {name: Retained events}
+  log_raw_messages: {name: Log raw messages}
