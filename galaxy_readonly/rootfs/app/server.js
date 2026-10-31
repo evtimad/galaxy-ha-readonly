@@ -6,8 +6,30 @@ const defaults = { panel_name: 'Galaxy 3-144 V5.00', module_name: 'E080-08A', li
   ack_enabled: true, ha_events: true, zone_names: [], zone_auto_clear_minutes: 0, retain_events: 500, log_raw_messages: true };
 let opt = defaults;
 try { opt = { ...defaults, ...JSON.parse(fs.readFileSync('/data/options.json', 'utf8')) }; } catch { console.warn('Using default options'); }
-const zoneNames = {};
-for (const line of opt.zone_names || []) { const m = String(line).match(/^\s*(\d+)\s*[=:]\s*(.+?)\s*$/); if (m) zoneNames[String(parseInt(m[1], 10))] = m[2]; }
+
+// ---- Names (editable in Web UI, stored in /data/names.json) ----
+const DATA_DIR = fs.existsSync('/data') ? '/data' : __dirname;
+const NAMES_FILE = path.join(DATA_DIR, 'names.json');
+const DEFAULT_NAMES = JSON.parse(fs.readFileSync(path.join(__dirname, 'default_names.json'), 'utf8'));
+let names;
+try { names = JSON.parse(fs.readFileSync(NAMES_FILE, 'utf8')); console.log(`Names loaded from ${NAMES_FILE}`); }
+catch { names = JSON.parse(JSON.stringify(DEFAULT_NAMES)); try { fs.writeFileSync(NAMES_FILE, JSON.stringify(names, null, 1)); } catch {} console.log('Names initialised from defaults'); }
+names.groups = names.groups || {}; names.zones = names.zones || {};
+const optionOverrides = {};
+for (const line of opt.zone_names || []) { const m = String(line).match(/^\s*(\d+)\s*[=:]\s*(.+?)\s*$/); if (m) optionOverrides[String(parseInt(m[1], 10))] = m[2]; }
+function zoneName(z) { return optionOverrides[z] || names.zones[z]?.name || `Зона ${z}`; }
+function groupName(g) { return names.groups[g] || `Група ${g}`; }
+const clean = (v, n) => String(v ?? '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, n);
+function validateNames(body) {
+  const out = { groups: {}, zones: {} };
+  for (const [g, v] of Object.entries(body.groups || {})) if (/^[1-8]$/.test(g)) { const s = clean(v, 40); if (s) out.groups[g] = s; }
+  for (const [z, v] of Object.entries(body.zones || {})) {
+    if (!/^\d{1,4}$/.test(z)) continue;
+    const key = String(parseInt(z, 10));
+    out.zones[key] = { name: clean(v?.name, 40) || `Зона ${key}`, group: /^[1-8]$/.test(String(v?.group ?? '')) ? String(v.group) : '', type: clean(v?.type, 20) };
+  }
+  return out;
+}
 
 // ---- Protocol ----
 const INIT_HELLO = 0x0000, INIT_ACK = 0x4A04;
@@ -20,7 +42,7 @@ function withCrc(body, init) { const c = crc16(body, init); return Buffer.concat
 function crcOk(m, init) { return init >= 0 && m.length > 2 && crc16(m.subarray(0, -2), init) === m.readUInt16BE(m.length - 2); }
 function helloReply(m) { return withCrc(Buffer.from([0x50, m[1], m[2]]), INIT_HELLO); }
 function ackFor(m) { return withCrc(Buffer.from([0x06, m[1], m[2], m[3], 0x52, 0xee, 0x63]), INIT_ACK); }
-const INIT_FILE = '/data/crc_inits.json';
+const INIT_FILE = path.join(DATA_DIR, 'crc_inits.json');
 const eventInits = { 51: 0x9E81, 63: 0x2912 };
 try { Object.assign(eventInits, JSON.parse(fs.readFileSync(INIT_FILE, 'utf8'))); } catch {}
 function initFor(m) {
@@ -55,8 +77,8 @@ function parsePayload(m) {
   return r;
 }
 
-// ---- Persistent state (survives app and HA restarts) ----
-const STATE_FILE = '/data/galaxy_state.json';
+// ---- Persistent state ----
+const STATE_FILE = path.join(DATA_DIR, 'galaxy_state.json');
 let persisted = { zones: {}, groups: {} };
 try { persisted = { zones: {}, groups: {}, ...JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) }; } catch {}
 let saveTimer = null;
@@ -72,28 +94,34 @@ function haToken() {
 }
 const HA_TOKEN = haToken();
 async function haCall(p, body, quiet) {
-  if (!opt.ha_events) return;
-  if (!HA_TOKEN) { console.warn(`HA API ${p}: no SUPERVISOR_TOKEN, skipped`); return; }
+  if (!opt.ha_events || !HA_TOKEN) return;
   try {
     const r = await fetch(`http://supervisor/core/api/${p}`, { method: 'POST', headers: { Authorization: `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r.ok) console.warn(`HA API ${p}: HTTP ${r.status} ${await r.text()}`); else if (!quiet) console.log(`HA API ${p}: OK`);
   } catch (e) { console.warn(`HA API ${p}: ${e.message}`); }
 }
-function zoneName(z) { return zoneNames[z] || `Galaxy зона ${z}`; }
+function zoneView(z) {
+  const s = persisted.zones[z] || { alarm: false }, n = names.zones[z] || {};
+  const g = n.group || '', gs = g && persisted.groups[g] ? persisted.groups[g].state : null;
+  return { zone: z, name: zoneName(z), group: g || null, group_name: g ? groupName(g) : null, type: n.type || null,
+    armed: !!gs && gs !== 'disarmed', alarm: !!s.alarm, alarm_type: s.alarm_type || null, omitted: !!s.omitted,
+    last_code: s.last_code || null, last_text: s.last_text || null, last_change: s.last_change || null, panel_time: s.panel_time || null };
+}
 function publishZone(z, quiet) {
-  const s = persisted.zones[z];
-  return haCall(`states/binary_sensor.galaxy_zone_${z}`, { state: s.alarm ? 'on' : 'off', attributes: {
-    friendly_name: zoneName(z), device_class: 'safety', zone: z, alarm_type: s.alarm_type || null, last_code: s.last_code,
-    last_text: s.last_text, omitted: !!s.omitted, last_change: s.last_change, panel_time: s.panel_time,
-    icon: s.alarm ? 'mdi:alarm-light' : s.omitted ? 'mdi:shield-off-outline' : 'mdi:shield-check' } }, quiet);
+  const v = zoneView(z);
+  return haCall(`states/binary_sensor.galaxy_zone_${z}`, { state: v.alarm ? 'on' : 'off', attributes: {
+    friendly_name: v.name, device_class: 'safety', zone: z, group: v.group, group_name: v.group_name, type: v.type, armed: v.armed,
+    alarm_type: v.alarm_type, omitted: v.omitted, last_code: v.last_code, last_text: v.last_text, last_change: v.last_change, panel_time: v.panel_time,
+    icon: v.alarm ? 'mdi:alarm-light' : v.omitted ? 'mdi:shield-off-outline' : v.armed ? 'mdi:shield-lock' : 'mdi:shield-check' } }, quiet);
 }
 function publishGroup(g, quiet) {
   const s = persisted.groups[g];
-  return haCall(`states/sensor.galaxy_group_${g}`, { state: s.state, attributes: { friendly_name: `Galaxy група ${g}`, user: s.user,
+  return haCall(`states/sensor.galaxy_group_${g}`, { state: s.state, attributes: { friendly_name: groupName(g), group: g, user: s.user,
     panel_time: s.panel_time, last_change: s.time, icon: s.state === 'disarmed' ? 'mdi:shield-off-outline' : 'mdi:shield-lock' } }, quiet);
 }
+function allZones() { return [...new Set([...Object.keys(names.zones), ...Object.keys(persisted.zones)])].sort((a, b) => a - b); }
 async function publishAll(quiet) {
-  for (const z of Object.keys(persisted.zones)) await publishZone(z, quiet);
+  for (const z of allZones()) await publishZone(z, quiet);
   for (const g of Object.keys(persisted.groups)) await publishGroup(g, quiet);
 }
 
@@ -105,10 +133,8 @@ const state = {
   events: [], lastEvent: null
 };
 const sse = new Set(), recent = new Map();
-function push(ev) {
-  state.events.unshift(ev); state.events.length = Math.min(state.events.length, opt.retain_events);
-  for (const r of sse) r.write(`event: galaxy\ndata: ${JSON.stringify(ev)}\n\n`);
-}
+function notifyUi(ev) { for (const r of sse) r.write(`event: galaxy\ndata: ${JSON.stringify(ev || {})}\n\n`); }
+function push(ev) { state.events.unshift(ev); state.events.length = Math.min(state.events.length, opt.retain_events); notifyUi(ev); }
 async function haCheck() {
   if (!opt.ha_events) { console.log('HA integration disabled'); return; }
   if (!HA_TOKEN) { console.warn('HA API: SUPERVISOR_TOKEN not found'); return; }
@@ -118,17 +144,16 @@ async function haCheck() {
     if (!r.ok) return;
     if (!state.lastEvent) haCall('states/sensor.galaxy_last_event', { state: 'waiting', attributes: { friendly_name: 'Galaxy last event', icon: 'mdi:shield-alert' } });
     await publishAll(true);
-    console.log(`Re-published ${Object.keys(persisted.zones).length} zone(s), ${Object.keys(persisted.groups).length} group(s)`);
+    console.log(`Published ${allZones().length} zone(s), ${Object.keys(persisted.groups).length} group(s)`);
   } catch (e) { console.warn(`HA API: ${e.message}`); }
 }
 
 function applyEvent(p, now) {
-  // Groups: CL / OP / NL
   if (p.group && ['CL', 'OP', 'NL'].includes(p.code)) {
     persisted.groups[p.group] = { state: p.code === 'OP' ? 'disarmed' : p.code === 'NL' ? 'armed_partial' : 'armed', user: p.user, panel_time: p.time, time: now };
     save(); publishGroup(p.group);
+    for (const z of allZones()) if ((names.zones[z] || {}).group === p.group) publishZone(z, true);   // update "armed" attribute
   }
-  // Zones: alarm / restore / omit
   if (!p.point) return;
   const z = p.point;
   if (ZONE_ALARM[p.code]) {
@@ -145,7 +170,6 @@ function applyEvent(p, now) {
   save(); publishZone(z);
 }
 
-// Optional auto-clear of zone alarms (safety net when restore events are not reported)
 if (opt.zone_auto_clear_minutes > 0) setInterval(() => {
   const limit = Date.now() - opt.zone_auto_clear_minutes * 60000;
   for (const [z, s] of Object.entries(persisted.zones)) if (s.alarm && Date.parse(s.last_change) < limit) {
@@ -153,7 +177,6 @@ if (opt.zone_auto_clear_minutes > 0) setInterval(() => {
     save(); publishZone(z); console.log(`Zone ${z}: alarm auto-cleared`);
   }
 }, 60000);
-// Re-publish periodically so entities reappear after a Home Assistant restart
 setInterval(() => publishAll(true), 5 * 60000);
 
 // ---- UDP receiver ----
@@ -184,15 +207,16 @@ sock.on('message', (m, info) => {
     recent.set(hex, t); for (const [k, v] of recent) if (t - v > 600000) recent.delete(k);
     state.stats.events++;
     const p = parsePayload(m);
+    const isZone = !!(ZONE_ALARM[p.code] || ZONE_RESTORE[p.code] || p.code === 'BB' || p.code === 'BU');
+    const zn = isZone && p.point ? zoneName(p.point) : null, gn = p.group ? groupName(p.group) : null;
     const ev = { time: now, type: 'event', title: p.text || p.description || `Събитие (${m.length} B)`, code: p.code, description: p.description,
-      group: p.group, user: p.user, point: p.point, panel_time: p.time, detail: p.plain };
+      group: p.group, group_name: gn, user: p.user, point: p.point, zone_name: zn, panel_time: p.time, detail: p.plain };
     push(ev); state.lastEvent = ev;
-    console.log(`Event ${p.code} "${p.text}" group=${p.group ?? '-'} user=${p.user ?? '-'} point=${p.point ?? '-'} @${p.time} | ${p.plain}`);
-    const isZone = !!(ZONE_ALARM[p.code] || ZONE_RESTORE[p.code]);
-    haCall('events/galaxy_event', { code: p.code, text: p.text, description: p.description, group: p.group, user: p.user, point: p.point,
-      zone: isZone ? p.point : null, account: p.account, panel_time: p.time, raw: hex, time: now });
+    console.log(`Event ${p.code} "${p.text}" group=${p.group ?? '-'} user=${p.user ?? '-'} point=${p.point ?? '-'}${zn ? ` (${zn})` : ''} @${p.time} | ${p.plain}`);
+    haCall('events/galaxy_event', { code: p.code, text: p.text, description: p.description, group: p.group, group_name: gn, user: p.user, point: p.point,
+      zone: isZone ? p.point : null, zone_name: zn, account: p.account, panel_time: p.time, raw: hex, time: now });
     haCall('states/sensor.galaxy_last_event', { state: (p.text || p.code || 'event').slice(0, 250), attributes: { friendly_name: 'Galaxy last event',
-      code: p.code, description: p.description, group: p.group, user: p.user, point: p.point, panel_time: p.time, received: now, icon: 'mdi:shield-alert' } });
+      code: p.code, description: p.description, group: p.group, group_name: gn, user: p.user, point: p.point, zone_name: zn, panel_time: p.time, received: now, icon: 'mdi:shield-alert' } });
     applyEvent(p, now);
     return;
   }
@@ -204,13 +228,38 @@ sock.on('error', e => console.error('UDP error:', e.message));
 
 // ---- Web UI (Ingress) ----
 const pub = path.join(__dirname, 'public');
+function json(res, code, obj) { res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(obj)); }
 function startWeb() {
   http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
     if (u.pathname.endsWith('/api/state')) {
-      const zones = Object.fromEntries(Object.entries(persisted.zones).map(([z, s]) => [z, { ...s, name: zoneName(z) }]));
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-      return res.end(JSON.stringify({ ...state, zones, groups: persisted.groups }));
+      const zones = Object.fromEntries(allZones().map(z => [z, zoneView(z)]));
+      const groups = {};
+      for (let g = 1; g <= 8; g++) groups[g] = { name: groupName(String(g)), ...(persisted.groups[g] || { state: null }) };
+      return json(res, 200, { ...state, zones, groups });
+    }
+    if (u.pathname.endsWith('/api/names')) {
+      if (req.method === 'GET') return json(res, 200, names);
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', c => { body += c; if (body.length > 300000) req.destroy(); });
+        req.on('end', () => {
+          try {
+            const v = validateNames(JSON.parse(body));
+            const removed = Object.keys(names.zones).filter(z => !v.zones[z]);
+            names = v; fs.writeFileSync(NAMES_FILE, JSON.stringify(names, null, 1));
+            console.log(`Names saved: ${Object.keys(names.zones).length} zone(s), ${Object.keys(names.groups).length} group(s)`);
+            publishAll(true); notifyUi();
+            json(res, 200, { ok: true, zones: Object.keys(names.zones).length, groups: Object.keys(names.groups).length, removed });
+          } catch (e) { json(res, 400, { ok: false, error: e.message }); }
+        });
+        return;
+      }
+      return json(res, 405, { ok: false });
+    }
+    if (u.pathname.endsWith('/api/names/reset') && req.method === 'POST') {
+      names = JSON.parse(JSON.stringify(DEFAULT_NAMES)); fs.writeFileSync(NAMES_FILE, JSON.stringify(names, null, 1));
+      publishAll(true); notifyUi(); return json(res, 200, { ok: true });
     }
     if (u.pathname.endsWith('/api/stream')) {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
@@ -224,8 +273,8 @@ function startWeb() {
 }
 
 if (require.main === module) {
-  sock.bind(opt.listen_port, '0.0.0.0', () => console.log(`Galaxy receiver v0.6.0 on udp/${opt.listen_port}, ACK ${opt.ack_enabled ? 'ON' : 'OFF'}, sender ${opt.allowed_sender || '(none - all ignored)'}, ${Object.keys(zoneNames).length} zone name(s)`));
+  sock.bind(opt.listen_port, '0.0.0.0', () => console.log(`Galaxy receiver v0.7.0 on udp/${opt.listen_port}, ACK ${opt.ack_enabled ? 'ON' : 'OFF'}, sender ${opt.allowed_sender || '(none - all ignored)'}, ${allZones().length} zone(s)`));
   setTimeout(haCheck, 3000);
   startWeb();
 }
-module.exports = { crc16, crcOk, initFor, ackFor, helloReply, parsePayload, applyEvent, persisted, XKEY };
+module.exports = { crc16, crcOk, initFor, ackFor, helloReply, parsePayload, applyEvent, persisted, XKEY, validateNames, zoneView, startWeb };

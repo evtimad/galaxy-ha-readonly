@@ -1,9 +1,16 @@
 <!doctype html><html lang="bg"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Galaxy 3-144</title><link rel="stylesheet" href="style.css"></head>
 <body><main><header><div><small>E080 ALARM MONITOR RECEIVER</small><h1>Galaxy 3-144</h1><p id="module">...</p></div><span class="badge" id="mode">-</span></header>
+<nav><button class="tab on" data-tab="status">Състояние</button><button class="tab" data-tab="log">Журнал</button><button class="tab" data-tab="names">Имена</button></nav>
+<div id="tab-status">
 <section class="metrics"><article><label>Събития</label><strong id="events">0</strong></article><article><label>Потвърдени (ACK)</label><strong id="acks">0</strong></article>
 <article><label>Сесия</label><strong id="session">-</strong></article><article><label>Последен пакет</label><strong id="last">Няма</strong></article>
 <article><label>Home Assistant API</label><strong id="ha">-</strong></article><article><label>Лош CRC / непознати</label><strong id="bad">0</strong></article></section>
-<h2 class="sec">Групи</h2><section class="metrics" id="groups"></section>
-<h2 class="sec">Зони</h2><section class="metrics" id="zones"></section>
-<section class="panel"><div class="title"><h2>Журнал</h2><button id="refresh">Обнови</button></div><div class="table"><table><thead><tr><th>Време</th><th>Събитие</th><th>Код</th><th>Група</th><th>Потребител</th><th>Точка/зона</th><th>Час в панела</th></tr></thead><tbody id="rows"></tbody></table></div></section>
+<div id="groups"></div></div>
+<div id="tab-log" hidden><section class="panel"><div class="title"><h2>Журнал</h2><button id="refresh">Обнови</button></div><div class="table"><table><thead><tr><th>Време</th><th>Събитие</th><th>Код</th><th>Група</th><th>Зона</th><th>Потребител</th><th>Час в панела</th></tr></thead><tbody id="rows"></tbody></table></div></section></div>
+<div id="tab-names" hidden>
+<section class="panel pad"><h2>Групи</h2><div class="ggrid" id="gnames"></div></section>
+<section class="panel pad"><div class="title0"><h2>Зони</h2><span><button id="addz">+ Зона</button></span></div>
+<div class="table"><table><thead><tr><th>Номер</th><th>Име</th><th>Група</th><th>Тип</th><th></th></tr></thead><tbody id="znames"></tbody></table></div></section>
+<div class="actions"><button class="primary" id="saveNames">Запази</button><button id="resetNames">Върни имената от панела</button><span id="saveMsg"></span></div>
+</div>
 <footer>Приложението не управлява панела. Изпраща само сесийни отговори и потвърждения, идентични с тези на Event Monitor.</footer></main><script src="app.js"></script></body></html>

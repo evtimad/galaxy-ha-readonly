@@ -5,7 +5,7 @@ configuration:
   allowed_sender: {name: E080 IP address}
   ack_enabled: {name: Acknowledge events (Event Monitor compatible)}
   ha_events: {name: Publish to Home Assistant}
-  zone_names: {name: Zone names, description: 'One per line, e.g. 1001=Front door'}
+  zone_names: {name: Zone name overrides (optional), description: 'Names are edited in the Web UI. Lines here (1001=Front door) override them.'}
   zone_auto_clear_minutes: {name: Auto-clear zone alarm after (minutes), description: '0 = only clear on restore event'}
   retain_events: {name: Retained events}
   log_raw_messages: {name: Log raw messages}

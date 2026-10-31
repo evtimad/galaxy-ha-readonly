@@ -1,11 +1,12 @@
 # Changelog
+## 0.7.0
+- Zone names, types and groups from the panel (RSS export) built in: 64 zones.
+- Group names (8 groups).
+- Names are editable in the Web UI ("Имена" tab) and saved in /data/names.json, no app update needed.
+- A sensor is created for every configured zone at startup (off = normal).
+- Zone attributes: group, group_name, type, armed (true when its group is set).
 ## 0.6.0
-- Zone sensors: binary_sensor.galaxy_zone_<zone> from alarm/restore events (BA/BR, TA/TR, FA/FR, PA/PR, HA/HR, KA/KR, UA/UR, MA/MR).
-- Omit (BB/BU) shown as attribute `omitted`.
-- Zone names via option `zone_names` (e.g. `1001=Front door`).
-- Zone and group states are stored in /data and re-published at startup and every 5 minutes (survive HA restarts).
-- Optional auto-clear of zone alarms (`zone_auto_clear_minutes`, 0 = off).
-- Web UI: zone and group cards.
+- Zone alarm sensors, persistence, auto-clear.
 ## 0.5.0
 - Payload decoding, group sensors.
 ## 0.4.x

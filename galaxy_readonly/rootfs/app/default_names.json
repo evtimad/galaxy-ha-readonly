@@ -1,0 +1,334 @@
+{
+ "groups": {
+  "1": "Етаж 1",
+  "2": "Етаж 2",
+  "3": "Таван",
+  "4": "Гараж 1",
+  "5": "Вход и стълбище",
+  "6": "Мазе",
+  "7": "Северна тераса",
+  "8": "Гараж 2"
+ },
+ "zones": {
+  "1001": {
+   "name": "FRONT DOOR",
+   "group": "5",
+   "type": "FINAL"
+  },
+  "1002": {
+   "name": "Entr. Corridor",
+   "group": "5",
+   "type": "EXIT"
+  },
+  "1003": {
+   "name": "Зона 1003",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1004": {
+   "name": "Зона 1004",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1005": {
+   "name": "Зона 1005",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1006": {
+   "name": "Зона 1006",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1007": {
+   "name": "Зона 1007",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1008": {
+   "name": "Зона 1008",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1011": {
+   "name": "ProzMazeZapad",
+   "group": "6",
+   "type": "INTRUDER"
+  },
+  "1012": {
+   "name": "ProzMazeIztok",
+   "group": "6",
+   "type": "INTRUDER"
+  },
+  "1013": {
+   "name": "1et Staia PIR",
+   "group": "1",
+   "type": "INTRUDER"
+  },
+  "1014": {
+   "name": "1et Staia Fire",
+   "group": "1",
+   "type": "FIRE"
+  },
+  "1015": {
+   "name": "Trapezaria Shock",
+   "group": "1",
+   "type": "SET LOG"
+  },
+  "1016": {
+   "name": "Trapezaria Fire",
+   "group": "1",
+   "type": "FIRE"
+  },
+  "1017": {
+   "name": "Kitchen PIR",
+   "group": "1",
+   "type": "INTRUDER"
+  },
+  "1018": {
+   "name": "Kitchen Fire",
+   "group": "1",
+   "type": "FIRE"
+  },
+  "1021": {
+   "name": "Tavan PIR",
+   "group": "3",
+   "type": "INTRUDER"
+  },
+  "1022": {
+   "name": "Stalbi Tavan PIR",
+   "group": "5",
+   "type": "SET LOG"
+  },
+  "1023": {
+   "name": "Tavan Fire",
+   "group": "3",
+   "type": "FIRE"
+  },
+  "1024": {
+   "name": "2et Koridorche",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1025": {
+   "name": "2et Bania Proz",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1026": {
+   "name": "1et Bania Proz",
+   "group": "1",
+   "type": "INTRUDER"
+  },
+  "1027": {
+   "name": "Spalnia Frenski",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1028": {
+   "name": "2et Stalbi PIR",
+   "group": "5",
+   "type": "INTRUDER"
+  },
+  "1031": {
+   "name": "Spalnia Glass",
+   "group": "2",
+   "type": "SET LOG"
+  },
+  "1032": {
+   "name": "ProzStalbiTavan",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1033": {
+   "name": "1et Staia Proz",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1034": {
+   "name": "2et Spalnia Fire",
+   "group": "2",
+   "type": "FIRE"
+  },
+  "1035": {
+   "name": "TSkladZapadFire",
+   "group": "3",
+   "type": "FIRE"
+  },
+  "1036": {
+   "name": "TavanStalbiFire",
+   "group": "5",
+   "type": "FIRE"
+  },
+  "1037": {
+   "name": "2et. Spalnia PIR",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1038": {
+   "name": "Зона 1038",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1051": {
+   "name": "Tavan Proz Dvor",
+   "group": "3",
+   "type": "INTRUDER"
+  },
+  "1052": {
+   "name": "2et Staia Fire",
+   "group": "2",
+   "type": "FIRE"
+  },
+  "1053": {
+   "name": "2et Staia Glass",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1054": {
+   "name": "TSkladIztokFire",
+   "group": "3",
+   "type": "FIRE"
+  },
+  "1055": {
+   "name": "Kabinet PIR",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1056": {
+   "name": "2et. Staia PIR",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1057": {
+   "name": "Зона 1057",
+   "group": "4",
+   "type": "KEYSWITCH"
+  },
+  "1058": {
+   "name": "Trapez VW Shade",
+   "group": "1",
+   "type": "INTRUDER"
+  },
+  "1061": {
+   "name": "Kuhnia Prozorec",
+   "group": "1",
+   "type": "INTRUDER"
+  },
+  "1062": {
+   "name": "Trapez. Prozorec",
+   "group": "1",
+   "type": "INTRUDER"
+  },
+  "1063": {
+   "name": "Trapezaria VW",
+   "group": "1",
+   "type": "INTRUDER"
+  },
+  "1064": {
+   "name": "Kabinet Prozorec",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1065": {
+   "name": "2et Proz Iztok",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1066": {
+   "name": "2et StaiaFrenski",
+   "group": "2",
+   "type": "INTRUDER"
+  },
+  "1067": {
+   "name": "TavProzIztok",
+   "group": "3",
+   "type": "INTRUDER"
+  },
+  "1068": {
+   "name": "Kabinet Fire",
+   "group": "2",
+   "type": "FIRE"
+  },
+  "2001": {
+   "name": "VrataTerasaSever",
+   "group": "5",
+   "type": "SPARE"
+  },
+  "2002": {
+   "name": "1et. Stalbi Proz",
+   "group": "1",
+   "type": "INTRUDER"
+  },
+  "2003": {
+   "name": "Maze PIR",
+   "group": "6",
+   "type": "INTRUDER"
+  },
+  "2004": {
+   "name": "Maze FIRE",
+   "group": "6",
+   "type": "INTRUDER"
+  },
+  "2005": {
+   "name": "Sklad 1et. Fire",
+   "group": "1",
+   "type": "FIRE"
+  },
+  "2006": {
+   "name": "Hol Shock",
+   "group": "1",
+   "type": "SPARE"
+  },
+  "2007": {
+   "name": "Garage2 PIR",
+   "group": "8",
+   "type": "INTRUDER"
+  },
+  "2008": {
+   "name": "Garage2 FIRE",
+   "group": "8",
+   "type": "FIRE"
+  },
+  "2011": {
+   "name": "1et. Stalbi PIR",
+   "group": "5",
+   "type": "INTRUDER"
+  },
+  "2012": {
+   "name": "Prozorci Garage",
+   "group": "4",
+   "type": "INTRUDER"
+  },
+  "2013": {
+   "name": "Garage Fire",
+   "group": "4",
+   "type": "FIRE"
+  },
+  "2014": {
+   "name": "North Terrace",
+   "group": "7",
+   "type": "SET LOG"
+  },
+  "2015": {
+   "name": "Koridor 1et.",
+   "group": "1",
+   "type": "INTRUDER"
+  },
+  "2016": {
+   "name": "Trapezaria",
+   "group": "1",
+   "type": "INTRUDER"
+  },
+  "2017": {
+   "name": "Glass Hol Old",
+   "group": "1",
+   "type": "INTRUDER"
+  },
+  "2018": {
+   "name": "Garage1 PIR",
+   "group": "4",
+   "type": "INTRUDER"
+  }
+ }
+}
