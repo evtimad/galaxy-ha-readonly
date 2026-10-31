@@ -1,5 +1,5 @@
 name: Galaxy 3-144 Read-only Gateway
-version: "0.5.0"
+version: "0.6.0"
 slug: galaxy_3144_readonly
 description: Galaxy E080 Alarm Monitor receiver for Home Assistant (no panel control)
 arch:
@@ -21,6 +21,8 @@ options:
   allowed_sender: "192.168.1.155"
   ack_enabled: true
   ha_events: true
+  zone_names: []
+  zone_auto_clear_minutes: 0
   retain_events: 500
   log_raw_messages: true
 schema:
@@ -30,5 +32,8 @@ schema:
   allowed_sender: str
   ack_enabled: bool
   ha_events: bool
+  zone_names:
+    - str
+  zone_auto_clear_minutes: int(0,1440)
   retain_events: int(10,5000)
   log_raw_messages: bool
