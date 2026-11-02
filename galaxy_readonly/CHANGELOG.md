@@ -1,10 +1,14 @@
 # Changelog
+## 0.7.2
+- Includes all 0.7.1 changes.
+- Device 15 is the virtual keypad (panel log shows KEY 15). Device names are added on first start if missing; existing names are kept.
+## 0.7.1
+- Field `pi` shown as "Zone" only for zone events. For set/unset and remote calls it is the device address (10 keypad, 15 virtual keypad, 4 Ethernet module).
+- Device names editable in the Web UI.
+- User name taken from the event text (e.g. "UNSET Evtim" -> Evtim; "MGR." -> Мениджър).
+- New attributes: device, device_name, user_name.
 ## 0.7.0
-- Zone names, types and groups from the panel (RSS export) built in: 64 zones.
-- Group names (8 groups).
-- Names are editable in the Web UI ("Имена" tab) and saved in /data/names.json, no app update needed.
-- A sensor is created for every configured zone at startup (off = normal).
-- Zone attributes: group, group_name, type, armed (true when its group is set).
+- Zone and group names, editable in the Web UI.
 ## 0.6.0
 - Zone alarm sensors, persistence, auto-clear.
 ## 0.5.0

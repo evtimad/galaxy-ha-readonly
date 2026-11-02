@@ -1,4 +1,4 @@
-# Galaxy 3-144 Gateway (v0.7.0)
+# Galaxy 3-144 Gateway (v0.7.2)
 Receives Galaxy E080 "Alarm Monitor" events in Home Assistant. Replies only with the session/ACK frames
 Event Monitor sends. Never sends commands, never arms/disarms, never programs the panel.
-Zone and group names: Web UI > "Имена". Stored in /data/names.json (kept across updates).
+Zone, group and device names: Web UI > "Имена". Stored in /data/names.json (kept across updates).

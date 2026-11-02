@@ -6,9 +6,10 @@
 <article><label>Сесия</label><strong id="session">-</strong></article><article><label>Последен пакет</label><strong id="last">Няма</strong></article>
 <article><label>Home Assistant API</label><strong id="ha">-</strong></article><article><label>Лош CRC / непознати</label><strong id="bad">0</strong></article></section>
 <div id="groups"></div></div>
-<div id="tab-log" hidden><section class="panel"><div class="title"><h2>Журнал</h2><button id="refresh">Обнови</button></div><div class="table"><table><thead><tr><th>Време</th><th>Събитие</th><th>Код</th><th>Група</th><th>Зона</th><th>Потребител</th><th>Час в панела</th></tr></thead><tbody id="rows"></tbody></table></div></section></div>
+<div id="tab-log" hidden><section class="panel"><div class="title"><h2>Журнал</h2><button id="refresh">Обнови</button></div><div class="table"><table><thead><tr><th>Време</th><th>Събитие</th><th>Код</th><th>Група</th><th>Зона</th><th>Устройство</th><th>Потребител</th><th>Час в панела</th></tr></thead><tbody id="rows"></tbody></table></div></section></div>
 <div id="tab-names" hidden>
 <section class="panel pad"><h2>Групи</h2><div class="ggrid" id="gnames"></div></section>
+<section class="panel pad"><div class="title0"><h2>Устройства</h2><span><button id="addd">+ Устройство</button></span></div><p class="hint">Адрес на устройството, от което е включена или изключена охраната: 10 = клавиатура, 15 = виртуална клавиатура, 4 = Ethernet модул.</p><div class="ggrid" id="dnames"></div></section>
 <section class="panel pad"><div class="title0"><h2>Зони</h2><span><button id="addz">+ Зона</button></span></div>
 <div class="table"><table><thead><tr><th>Номер</th><th>Име</th><th>Група</th><th>Тип</th><th></th></tr></thead><tbody id="znames"></tbody></table></div></section>
 <div class="actions"><button class="primary" id="saveNames">Запази</button><button id="resetNames">Върни имената от панела</button><span id="saveMsg"></span></div>

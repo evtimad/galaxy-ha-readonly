@@ -1,5 +1,6 @@
 'use strict';
 // Galaxy 3-144 / E080 A.Monitor receiver for Home Assistant. Receive-only: no panel control.
+const VERSION = '0.7.2';
 const http = require('http'), dgram = require('dgram'), fs = require('fs'), path = require('path');
 
 const defaults = { panel_name: 'Galaxy 3-144 V5.00', module_name: 'E080-08A', listen_port: 10002, allowed_sender: '',
@@ -13,16 +14,21 @@ const NAMES_FILE = path.join(DATA_DIR, 'names.json');
 const DEFAULT_NAMES = JSON.parse(fs.readFileSync(path.join(__dirname, 'default_names.json'), 'utf8'));
 let names;
 try { names = JSON.parse(fs.readFileSync(NAMES_FILE, 'utf8')); console.log(`Names loaded from ${NAMES_FILE}`); }
-catch { names = JSON.parse(JSON.stringify(DEFAULT_NAMES)); try { fs.writeFileSync(NAMES_FILE, JSON.stringify(names, null, 1)); } catch {} console.log('Names initialised from defaults'); }
+catch { names = JSON.parse(JSON.stringify(DEFAULT_NAMES)); console.log('Names initialised from defaults'); }
 names.groups = names.groups || {}; names.zones = names.zones || {};
+if (!names.devices) names.devices = { ...DEFAULT_NAMES.devices };                     // upgrade from v0.7.0
+else if (names.devices['15'] === 'Отдалечен достъп') names.devices['15'] = DEFAULT_NAMES.devices['15']; // fix v0.7.1 default
+try { fs.writeFileSync(NAMES_FILE, JSON.stringify(names, null, 1)); } catch {}
 const optionOverrides = {};
 for (const line of opt.zone_names || []) { const m = String(line).match(/^\s*(\d+)\s*[=:]\s*(.+?)\s*$/); if (m) optionOverrides[String(parseInt(m[1], 10))] = m[2]; }
 function zoneName(z) { return optionOverrides[z] || names.zones[z]?.name || `Зона ${z}`; }
 function groupName(g) { return names.groups[g] || `Група ${g}`; }
+function deviceName(d) { return names.devices[d] || `Устройство ${d}`; }
 const clean = (v, n) => String(v ?? '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, n);
 function validateNames(body) {
-  const out = { groups: {}, zones: {} };
+  const out = { groups: {}, zones: {}, devices: {} };
   for (const [g, v] of Object.entries(body.groups || {})) if (/^[1-8]$/.test(g)) { const s = clean(v, 40); if (s) out.groups[g] = s; }
+  for (const [d, v] of Object.entries(body.devices || {})) if (/^\d{1,3}$/.test(d)) { const s = clean(v, 40); if (s) out.devices[String(parseInt(d, 10))] = s; }
   for (const [z, v] of Object.entries(body.zones || {})) {
     if (!/^\d{1,4}$/.test(z)) continue;
     const key = String(parseInt(z, 10));
@@ -65,6 +71,14 @@ const CODES = { CL: 'Включена', OP: 'Изключена', NL: 'Част�
   AT: 'AC авария', AR: 'AC възстановено', YT: 'Акумулатор авария', YR: 'Акумулатор възстановен' };
 const ZONE_ALARM = { BA: 'Взлом', TA: 'Тампер', FA: 'Пожар', PA: 'Паник', HA: 'Нападение', KA: 'Топлина', UA: 'Аларма', MA: 'Медицинска' };
 const ZONE_RESTORE = { BR: 'BA', TR: 'TA', FR: 'FA', PR: 'PA', HR: 'HA', KR: 'KA', UR: 'UA', MR: 'MA' };
+const isZoneCode = c => !!(ZONE_ALARM[c] || ZONE_RESTORE[c] || c === 'BB' || c === 'BU');
+const SET_CODES = ['CL', 'OP', 'NL'];
+function userNameFrom(code, text) {
+  if (!SET_CODES.includes(code) || !text) return null;
+  const rest = text.replace(/^(FULL SET|PART SET|NIGHT SET|SET|UNSET)\s*/i, '').trim();
+  if (!rest) return null;
+  return /^MGR\.?$/i.test(rest) ? 'Мениджър' : rest;
+}
 function parsePayload(m) {
   const d = decode(m).toString('latin1');
   const r = { account: (d.match(/#(\d+)/) || [])[1] || '', time: (d.match(/ti(\d\d:\d\d)/) || [])[1] || '',
@@ -72,6 +86,9 @@ function parsePayload(m) {
   const c = d.match(/\/([A-Z]{2})(?=[^A-Za-z]|$)/); r.code = c ? c[1] : '';
   const t = d.match(/A([ -~]{3,})[^ -~]*$/); r.text = t ? t[1].replace(/\s+/g, ' ').trim() : '';
   for (const k of ['group', 'user', 'point']) if (r[k] !== undefined) r[k] = String(parseInt(r[k], 10)); else delete r[k];
+  // "pi" = zone address for zone events, device address otherwise (10 keypad, 15 virtual keypad, 4 Ethernet module)
+  if (r.point !== undefined) { if (isZoneCode(r.code)) r.zone = r.point; else r.device = r.point; }
+  r.user_name = userNameFrom(r.code, r.text);
   r.description = CODES[r.code] || r.text || r.code;
   r.plain = d.replace(/[^ -~]/g, '.');
   return r;
@@ -116,7 +133,8 @@ function publishZone(z, quiet) {
 }
 function publishGroup(g, quiet) {
   const s = persisted.groups[g];
-  return haCall(`states/sensor.galaxy_group_${g}`, { state: s.state, attributes: { friendly_name: groupName(g), group: g, user: s.user,
+  return haCall(`states/sensor.galaxy_group_${g}`, { state: s.state, attributes: { friendly_name: groupName(g), group: g,
+    user: s.user, user_name: s.user_name || null, device: s.device || null, device_name: s.device ? deviceName(s.device) : null,
     panel_time: s.panel_time, last_change: s.time, icon: s.state === 'disarmed' ? 'mdi:shield-off-outline' : 'mdi:shield-lock' } }, quiet);
 }
 function allZones() { return [...new Set([...Object.keys(names.zones), ...Object.keys(persisted.zones)])].sort((a, b) => a - b); }
@@ -127,7 +145,7 @@ async function publishAll(quiet) {
 
 // ---- Runtime state ----
 const state = {
-  panel: { name: opt.panel_name, module: opt.module_name, receiver: `udp:${opt.listen_port}`, mode: opt.ack_enabled ? 'receiver (ACK)' : 'passive',
+  panel: { name: opt.panel_name, module: opt.module_name, receiver: `udp:${opt.listen_port}`, version: VERSION, mode: opt.ack_enabled ? 'receiver (ACK)' : 'passive',
            session: false, ha: HA_TOKEN ? 'token OK' : 'no token', lastSender: null, lastMessageAt: null },
   stats: { received: 0, events: 0, acks: 0, duplicates: 0, rejected: 0, badCrc: 0, unknown: 0, startedAt: new Date().toISOString() },
   events: [], lastEvent: null
@@ -149,13 +167,14 @@ async function haCheck() {
 }
 
 function applyEvent(p, now) {
-  if (p.group && ['CL', 'OP', 'NL'].includes(p.code)) {
-    persisted.groups[p.group] = { state: p.code === 'OP' ? 'disarmed' : p.code === 'NL' ? 'armed_partial' : 'armed', user: p.user, panel_time: p.time, time: now };
+  if (p.group && SET_CODES.includes(p.code)) {
+    persisted.groups[p.group] = { state: p.code === 'OP' ? 'disarmed' : p.code === 'NL' ? 'armed_partial' : 'armed',
+      user: p.user, user_name: p.user_name, device: p.device, panel_time: p.time, time: now };
     save(); publishGroup(p.group);
-    for (const z of allZones()) if ((names.zones[z] || {}).group === p.group) publishZone(z, true);   // update "armed" attribute
+    for (const z of allZones()) if ((names.zones[z] || {}).group === p.group) publishZone(z, true);
   }
-  if (!p.point) return;
-  const z = p.point;
+  if (!p.zone) return;
+  const z = p.zone;
   if (ZONE_ALARM[p.code]) {
     persisted.zones[z] = { ...(persisted.zones[z] || {}), alarm: true, alarm_type: ZONE_ALARM[p.code], alarm_code: p.code,
       last_code: p.code, last_text: p.text, panel_time: p.time, last_change: now };
@@ -207,16 +226,18 @@ sock.on('message', (m, info) => {
     recent.set(hex, t); for (const [k, v] of recent) if (t - v > 600000) recent.delete(k);
     state.stats.events++;
     const p = parsePayload(m);
-    const isZone = !!(ZONE_ALARM[p.code] || ZONE_RESTORE[p.code] || p.code === 'BB' || p.code === 'BU');
-    const zn = isZone && p.point ? zoneName(p.point) : null, gn = p.group ? groupName(p.group) : null;
+    const zn = p.zone ? zoneName(p.zone) : null, gn = p.group ? groupName(p.group) : null, dn = p.device ? deviceName(p.device) : null;
     const ev = { time: now, type: 'event', title: p.text || p.description || `Събитие (${m.length} B)`, code: p.code, description: p.description,
-      group: p.group, group_name: gn, user: p.user, point: p.point, zone_name: zn, panel_time: p.time, detail: p.plain };
+      group: p.group, group_name: gn, user: p.user, user_name: p.user_name, zone: p.zone, zone_name: zn, device: p.device, device_name: dn,
+      panel_time: p.time, detail: p.plain };
     push(ev); state.lastEvent = ev;
-    console.log(`Event ${p.code} "${p.text}" group=${p.group ?? '-'} user=${p.user ?? '-'} point=${p.point ?? '-'}${zn ? ` (${zn})` : ''} @${p.time} | ${p.plain}`);
-    haCall('events/galaxy_event', { code: p.code, text: p.text, description: p.description, group: p.group, group_name: gn, user: p.user, point: p.point,
-      zone: isZone ? p.point : null, zone_name: zn, account: p.account, panel_time: p.time, raw: hex, time: now });
+    console.log(`Event ${p.code} "${p.text}" group=${p.group ?? '-'} user=${p.user ?? '-'} ${p.zone ? `zone=${p.zone} (${zn})` : `device=${p.device ?? '-'}${dn ? ` (${dn})` : ''}`} @${p.time} | ${p.plain}`);
+    haCall('events/galaxy_event', { code: p.code, text: p.text, description: p.description, group: p.group, group_name: gn,
+      user: p.user, user_name: p.user_name, zone: p.zone ?? null, zone_name: zn, device: p.device ?? null, device_name: dn,
+      point: p.point, account: p.account, panel_time: p.time, raw: hex, time: now });
     haCall('states/sensor.galaxy_last_event', { state: (p.text || p.code || 'event').slice(0, 250), attributes: { friendly_name: 'Galaxy last event',
-      code: p.code, description: p.description, group: p.group, group_name: gn, user: p.user, point: p.point, zone_name: zn, panel_time: p.time, received: now, icon: 'mdi:shield-alert' } });
+      code: p.code, description: p.description, group: p.group, group_name: gn, user: p.user, user_name: p.user_name,
+      zone: p.zone ?? null, zone_name: zn, device: p.device ?? null, device_name: dn, panel_time: p.time, received: now, icon: 'mdi:shield-alert' } });
     applyEvent(p, now);
     return;
   }
@@ -235,8 +256,15 @@ function startWeb() {
     if (u.pathname.endsWith('/api/state')) {
       const zones = Object.fromEntries(allZones().map(z => [z, zoneView(z)]));
       const groups = {};
-      for (let g = 1; g <= 8; g++) groups[g] = { name: groupName(String(g)), ...(persisted.groups[g] || { state: null }) };
+      for (let g = 1; g <= 8; g++) {
+        const s = persisted.groups[g] || { state: null };
+        groups[g] = { name: groupName(String(g)), ...s, device_name: s.device ? deviceName(s.device) : null };
+      }
       return json(res, 200, { ...state, zones, groups });
+    }
+    if (u.pathname.endsWith('/api/names/reset') && req.method === 'POST') {
+      names = JSON.parse(JSON.stringify(DEFAULT_NAMES)); fs.writeFileSync(NAMES_FILE, JSON.stringify(names, null, 1));
+      publishAll(true); notifyUi(); return json(res, 200, { ok: true });
     }
     if (u.pathname.endsWith('/api/names')) {
       if (req.method === 'GET') return json(res, 200, names);
@@ -245,21 +273,15 @@ function startWeb() {
         req.on('data', c => { body += c; if (body.length > 300000) req.destroy(); });
         req.on('end', () => {
           try {
-            const v = validateNames(JSON.parse(body));
-            const removed = Object.keys(names.zones).filter(z => !v.zones[z]);
-            names = v; fs.writeFileSync(NAMES_FILE, JSON.stringify(names, null, 1));
-            console.log(`Names saved: ${Object.keys(names.zones).length} zone(s), ${Object.keys(names.groups).length} group(s)`);
+            names = validateNames(JSON.parse(body)); fs.writeFileSync(NAMES_FILE, JSON.stringify(names, null, 1));
+            console.log(`Names saved: ${Object.keys(names.zones).length} zone(s), ${Object.keys(names.groups).length} group(s), ${Object.keys(names.devices).length} device(s)`);
             publishAll(true); notifyUi();
-            json(res, 200, { ok: true, zones: Object.keys(names.zones).length, groups: Object.keys(names.groups).length, removed });
+            json(res, 200, { ok: true, zones: Object.keys(names.zones).length, groups: Object.keys(names.groups).length, devices: Object.keys(names.devices).length });
           } catch (e) { json(res, 400, { ok: false, error: e.message }); }
         });
         return;
       }
       return json(res, 405, { ok: false });
-    }
-    if (u.pathname.endsWith('/api/names/reset') && req.method === 'POST') {
-      names = JSON.parse(JSON.stringify(DEFAULT_NAMES)); fs.writeFileSync(NAMES_FILE, JSON.stringify(names, null, 1));
-      publishAll(true); notifyUi(); return json(res, 200, { ok: true });
     }
     if (u.pathname.endsWith('/api/stream')) {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
@@ -273,7 +295,7 @@ function startWeb() {
 }
 
 if (require.main === module) {
-  sock.bind(opt.listen_port, '0.0.0.0', () => console.log(`Galaxy receiver v0.7.0 on udp/${opt.listen_port}, ACK ${opt.ack_enabled ? 'ON' : 'OFF'}, sender ${opt.allowed_sender || '(none - all ignored)'}, ${allZones().length} zone(s)`));
+  sock.bind(opt.listen_port, '0.0.0.0', () => console.log(`Galaxy receiver v${VERSION} on udp/${opt.listen_port}, ACK ${opt.ack_enabled ? 'ON' : 'OFF'}, sender ${opt.allowed_sender || '(none - all ignored)'}, ${allZones().length} zone(s)`));
   setTimeout(haCheck, 3000);
   startWeb();
 }
